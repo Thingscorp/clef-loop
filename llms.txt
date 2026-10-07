@@ -1,0 +1,24 @@
+# clef-loop
+
+Clef is a decision helper for coding agents — it judges; it does not chat,
+code, or complete. clef-loop wraps it in a recursive six-phase QA loop:
+the agent does the legwork (reads code, writes the test sheet, runs cases,
+applies fixes) and Clef makes every judgment call — coverage, dedup, risk
+triage, failure triage, severity, fix approval, regression verdict,
+confidence, and loop termination.
+
+- Repo: https://github.com/Thingscorp/clef-loop
+- Agent skill: `SKILL.md` at the repo root — point any agent at the URL.
+- Docs: https://github.com/Thingscorp/clef-loop#readme
+
+## CLI
+
+```sh
+export CLEF_API_KEY=...
+bin/clef-decide --state-file state.md --questions questions.json [--model clef-flash]
+```
+
+Key chain: `--api-key` → `$CLEF_API_KEY` → `$EXPERIENTIAL_API_KEY` (legacy)
+→ `api_key=` in `~/.config/clef-decide/config`. Models: `clef` (default),
+`clef-flash` (`:free` suffix preserved on both). Question types:
+`choice`, `noul`, `score` — see `docs/question-sets.md` for the per-phase sets.

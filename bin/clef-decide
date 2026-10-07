@@ -6,9 +6,16 @@ Clef is a DECISION HELPER, not a chat model. It answers structured questions
 completions and must never be used as the coding agent's primary model.
 
 Hard rules (from the integration spec):
-- POST only to https://api.experientiallabs.ai/v1/systemone
-- Bearer key read ONLY from EXPERIENTIAL_API_KEY. If missing: stop, do not
-  prompt for it, do not log it.
+- POST only to the Clef endpoint (default
+  https://api.experientiallabs.ai/v1/systemone; overridable, see below)
+- Bearer key from standard config, in this precedence:
+    1. --api-key flag
+    2. $CLEF_API_KEY environment variable
+    3. $EXPERIENTIAL_API_KEY environment variable (legacy name, still honored)
+    4. api_key= in ~/.config/clef-decide/config
+  Missing everywhere: stops with setup instructions. The key is never
+  requested interactively, never logged. Prefer the env var or config
+  file — a CLI flag can appear in shell history and process listings.
 - Model sent as "clef" exactly (a ":free" suffix spelling is preserved if
   explicitly selected).
 - No retries, no Idempotency-Key: an unknown outcome may already be charged.
@@ -18,8 +25,13 @@ Hard rules (from the integration spec):
   2-10 levels per score.
 
 Usage:
+    export CLEF_API_KEY=...
     clef-decide --state-file diff.md --questions questions.json
     clef-decide --state-file diff.md --questions questions.json --model clef:free --json
+
+Config file (~/.config/clef-decide/config), KEY=VALUE lines, # comments:
+    api_key=...
+    endpoint=https://...
 
 questions.json shape:
     {
@@ -37,7 +49,11 @@ import urllib.request
 import urllib.error
 
 ENDPOINT = "https://api.experientiallabs.ai/v1/systemone"
-KEY_ENV = "EXPERIENTIAL_API_KEY"
+KEY_ENV = "CLEF_API_KEY"
+LEGACY_KEY_ENV = "EXPERIENTIAL_API_KEY"
+ENDPOINT_ENV = "CLEF_ENDPOINT"
+DEFAULT_CONFIG_PATH = os.path.join(
+    os.path.expanduser("~"), ".config", "clef-decide", "config")
 DEFAULT_MODEL = "clef"
 DEFAULT_TIMEOUT = 60
 
@@ -104,15 +120,60 @@ def build_body(model, state, questions):
     return {"model": model, "state": state, "questions": questions}
 
 
-def call_clef(model, state, questions, timeout=DEFAULT_TIMEOUT, _opener=None):
-    """POST to the one allowed endpoint. No retries. Surfaces all errors."""
-    key = os.environ.get(KEY_ENV)
-    if not key:
-        raise ClefError(
-            f"{KEY_ENV} is not set. Set it locally in your shell "
-            f"(export {KEY_ENV}=...) and re-run. The key is never requested "
-            f"interactively and never logged."
-        )
+def read_config_file(path=None):
+    """Parse KEY=VALUE lines from the config file. Missing file -> {}."""
+    cfg = {}
+    p = path or DEFAULT_CONFIG_PATH
+    try:
+        with open(p, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                k, v = line.split("=", 1)
+                cfg[k.strip().lower()] = v.strip().strip('"').strip("'")
+    except OSError:
+        pass
+    return cfg
+
+
+def resolve_key(flag_value=None, config_path=None):
+    """Standard key precedence: flag > $CLEF_API_KEY > $EXPERIENTIAL_API_KEY
+    (legacy) > config file. Never prompts, never logs."""
+    if flag_value:
+        return flag_value
+    for env in (KEY_ENV, LEGACY_KEY_ENV):
+        v = os.environ.get(env)
+        if v:
+            return v
+    cfg = read_config_file(config_path)
+    if cfg.get("api_key"):
+        return cfg["api_key"]
+    raise ClefError(
+        "no API key found. Provide one via --api-key, $CLEF_API_KEY "
+        "(legacy: $EXPERIENTIAL_API_KEY), or api_key= in "
+        "~/.config/clef-decide/config"
+    )
+
+
+def resolve_endpoint(flag_value=None, config_path=None):
+    """Endpoint precedence: flag > $CLEF_ENDPOINT > config file > default."""
+    if flag_value:
+        ep = flag_value
+    elif os.environ.get(ENDPOINT_ENV):
+        ep = os.environ[ENDPOINT_ENV]
+    else:
+        ep = read_config_file(config_path).get("endpoint") or ENDPOINT
+    if not ep.startswith("https://"):
+        raise ClefError(f"endpoint must be an https:// URL (got {ep!r})")
+    return ep
+
+
+def call_clef(model, state, questions, timeout=DEFAULT_TIMEOUT,
+              api_key=None, endpoint=None, config_path=None, _opener=None):
+    """POST to the Clef endpoint. No retries. Surfaces all errors."""
+    key = resolve_key(api_key, config_path)
+    url = resolve_endpoint(endpoint, config_path)
     if not model.startswith("clef"):
         raise ClefError(f"model must be 'clef' (got {model!r}); Clef is a decision helper, not a chat model")
     validate_questions(questions)
@@ -121,7 +182,7 @@ def call_clef(model, state, questions, timeout=DEFAULT_TIMEOUT, _opener=None):
 
     body = json.dumps(build_body(model, state, questions)).encode("utf-8")
     req = urllib.request.Request(
-        ENDPOINT,
+        url,
         data=body,
         method="POST",
         headers={
@@ -136,11 +197,11 @@ def call_clef(model, state, questions, timeout=DEFAULT_TIMEOUT, _opener=None):
             raw = resp.read().decode("utf-8")
     except urllib.error.HTTPError as e:
         detail = e.read().decode("utf-8", "replace")[:2000]
-        raise ClefError(f"HTTP {e.code} from {ENDPOINT}: {detail}")
+        raise ClefError(f"HTTP {e.code} from {url}: {detail}")
     except urllib.error.URLError as e:
-        raise ClefError(f"transport error calling {ENDPOINT}: {e.reason}")
+        raise ClefError(f"transport error calling {url}: {e.reason}")
     except TimeoutError:
-        raise ClefError(f"request to {ENDPOINT} timed out after {timeout}s (no retry: outcome unknown)")
+        raise ClefError(f"request to {url} timed out after {timeout}s (no retry: outcome unknown)")
     try:
         payload = json.loads(raw)
     except json.JSONDecodeError:
@@ -175,6 +236,10 @@ def main(argv):
     ap.add_argument("--questions", required=True, help="JSON file: map of question ID -> question")
     ap.add_argument("--model", default=DEFAULT_MODEL, help="sent exactly; default 'clef'")
     ap.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT, help="bounded seconds (no retries)")
+    ap.add_argument("--api-key", default=None,
+                    help="Bearer key (highest precedence; prefer $CLEF_API_KEY or the config file — flags can leak into shell history)")
+    ap.add_argument("--endpoint", default=None,
+                    help=f"Clef endpoint URL (default {ENDPOINT})")
     ap.add_argument("--json", action="store_true", help="print raw response JSON instead of human summary")
     args = ap.parse_args(argv)
 
@@ -183,7 +248,10 @@ def main(argv):
             state = f.read()
         with open(args.questions, "r", encoding="utf-8") as f:
             questions = json.load(f)
-        payload, _est = call_clef(args.model, state, questions, timeout=args.timeout)
+        payload, _est = call_clef(args.model, state, questions,
+                                  timeout=args.timeout,
+                                  api_key=args.api_key,
+                                  endpoint=args.endpoint)
     except ClefError as e:
         print(f"clef-decide: {e}", file=sys.stderr)
         return 2

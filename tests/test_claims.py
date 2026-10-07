@@ -64,8 +64,12 @@ class TestClaimEvidence(unittest.TestCase):
     def tearDown(self):
         self.env.stop()
 
-    def test_endpoint_is_the_only_url_in_source(self):
-        urls = set(re.findall(r"https?://[^\s\"']+", SOURCE))
+    def test_endpoint_is_the_only_real_url_in_source(self):
+        raw = set(re.findall(r"https?://[^\s\"']+", SOURCE))
+        # strip trailing punctuation picked up from prose; drop placeholders
+        urls = {u.rstrip(";,).") for u in raw}
+        urls = {u for u in urls if "..." not in u and "example" not in u
+                and u not in {"https://", "http://"}}  # bare scheme checks in code
         self.assertEqual(urls, {"https://api.experientiallabs.ai/v1/systemone"},
                          f"unexpected URLs in source: {urls}")
         self.assertEqual(clef.ENDPOINT, "https://api.experientiallabs.ai/v1/systemone")

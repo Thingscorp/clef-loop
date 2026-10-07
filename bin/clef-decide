@@ -16,8 +16,9 @@ Hard rules (from the integration spec):
   Missing everywhere: stops with setup instructions. The key is never
   requested interactively, never logged. Prefer the env var or config
   file — a CLI flag can appear in shell history and process listings.
-- Model sent as "clef" exactly (a ":free" suffix spelling is preserved if
-  explicitly selected).
+- Model sent as "clef" or "clef-flash" exactly (a ":free" suffix spelling
+  is preserved if explicitly selected). Anything else is rejected — these
+  are decision helpers, not chat models.
 - No retries, no Idempotency-Key: an unknown outcome may already be charged.
 - Bounded timeout. HTTP/transport errors surface, nothing is hidden.
 - Clef context budget: 16,384 tokens shared by state + question definitions.
@@ -55,6 +56,7 @@ ENDPOINT_ENV = "CLEF_ENDPOINT"
 DEFAULT_CONFIG_PATH = os.path.join(
     os.path.expanduser("~"), ".config", "clef-decide", "config")
 DEFAULT_MODEL = "clef"
+ALLOWED_MODELS = ("clef", "clef-flash")
 DEFAULT_TIMEOUT = 60
 
 MAX_CONTEXT_TOKENS = 16384
@@ -174,8 +176,11 @@ def call_clef(model, state, questions, timeout=DEFAULT_TIMEOUT,
     """POST to the Clef endpoint. No retries. Surfaces all errors."""
     key = resolve_key(api_key, config_path)
     url = resolve_endpoint(endpoint, config_path)
-    if not model.startswith("clef"):
-        raise ClefError(f"model must be 'clef' (got {model!r}); Clef is a decision helper, not a chat model")
+    base = model.split(":")[0]
+    if base not in ALLOWED_MODELS:
+        raise ClefError(
+            f"model must be one of {ALLOWED_MODELS} (got {model!r}); "
+            "Clef is a decision helper, not a chat model")
     validate_questions(questions)
     state_text = state if isinstance(state, str) else json.dumps(state, sort_keys=True)
     est = check_context_budget(state_text, questions)
@@ -234,7 +239,8 @@ def main(argv):
     ap = argparse.ArgumentParser(description="Clef decision helper (SystemOne). Never a chat model.")
     ap.add_argument("--state-file", required=True, help="file with the state text (concise diff + test summary)")
     ap.add_argument("--questions", required=True, help="JSON file: map of question ID -> question")
-    ap.add_argument("--model", default=DEFAULT_MODEL, help="sent exactly; default 'clef'")
+    ap.add_argument("--model", default=DEFAULT_MODEL,
+                    help="clef or clef-flash (sent exactly; a :free suffix spelling is preserved)")
     ap.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT, help="bounded seconds (no retries)")
     ap.add_argument("--api-key", default=None,
                     help="Bearer key (highest precedence; prefer $CLEF_API_KEY or the config file — flags can leak into shell history)")

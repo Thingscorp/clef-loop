@@ -102,6 +102,23 @@ class TestClefDecide(unittest.TestCase):
         clef.call_clef("clef:free", "s", QUESTIONS, _opener=make_opener(cap))
         self.assertEqual(cap["body"]["model"], "clef:free")
 
+    def test_flash_model_sent_exactly(self):
+        cap = {}
+        clef.call_clef("clef-flash", "s", QUESTIONS, _opener=make_opener(cap))
+        self.assertEqual(cap["body"]["model"], "clef-flash")
+        self.assertEqual(cap["url"], "https://api.experientiallabs.ai/v1/systemone")
+        self.assertEqual(cap["method"], "POST")
+
+    def test_flash_free_spelling_preserved(self):
+        cap = {}
+        clef.call_clef("clef-flash:free", "s", QUESTIONS, _opener=make_opener(cap))
+        self.assertEqual(cap["body"]["model"], "clef-flash:free")
+
+    def test_unknown_clef_variant_rejected(self):
+        for bad in ("gpt-4", "clef-turbo", "clef-", "clefflash", "flash"):
+            with self.assertRaises(clef.ClefError, msg=bad):
+                clef.call_clef(bad, "s", QUESTIONS, _opener=make_opener({}))
+
     def test_non_clef_model_rejected(self):
         with self.assertRaises(clef.ClefError):
             clef.call_clef("gpt-4", "s", QUESTIONS, _opener=make_opener({}))

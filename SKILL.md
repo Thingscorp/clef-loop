@@ -43,9 +43,9 @@ Status, Defect Count, Severity, Notes, Last Tested Date. IDs `F-001`,
 `D-001`, sequential, never reused. Status: `undiscovered` | `documented` |
 `tests-written` | `tested` | `failing` | `fixed` | `waived` | `regressed`.
 
-**Driving.** Every gate is one `bin/clef-decide` call. Concrete question
-sets live in `docs/question-sets.md` — use them verbatim, filling in the
-IDs. Rules for every call:
+**Driving.** Every gate is one `bin/clef-decide` call (add `--model clef-flash`
+for the fast 9B variant; default is `clef`). Concrete question sets live in
+`docs/question-sets.md` — use them verbatim, filling in the IDs. Rules for every call:
 
 - State is concise: diffs, test summaries, failure records, iteration
   reports. Never the whole repo. Budget is 16384 tokens shared by state

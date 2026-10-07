@@ -6,7 +6,7 @@ The rule of the loop: **the agent is the hands, Clef is the judge.** No gated de
 
 ## Verified claims
 
-Every claim below is backed by a test in `tests/` — fully mocked, no network, no key, no charges. Run them yourself: `python3 -m unittest discover -s tests` (28/28 pass, ~0.07s).
+Every claim below is backed by a test in `tests/` — fully mocked, no network, no key, no charges. Run them yourself: `python3 -m unittest discover -s tests` (32/32 pass, ~0.07s).
 
 | Claim | Backing data |
 |---|---|
@@ -16,6 +16,7 @@ Every claim below is backed by a test in `tests/` — fully mocked, no network, 
 | 16,384-token budget enforced before sending | `test_context_budget_refuses`; `test_constants_match_claims` pins the constant |
 | ≤32 questions, ≤64 options, 2–10 score levels | `test_gateway_bounds` exercises each bound; `test_constants_match_claims` pins them |
 | `bin/clef-decide` is executable and stdlib-only | `test_helper_is_executable`; `test_stdlib_only_imports` (imports: argparse, json, os, sys, urllib — nothing else) |
+| Model is `clef` or `clef-flash` only (`:free` preserved); anything else rejected | `test_flash_model_sent_exactly`, `test_flash_free_spelling_preserved`, `test_unknown_clef_variant_rejected`, `test_model_allowlist_pinned` |
 
 ## Quickstart
 
@@ -28,6 +29,19 @@ bin/clef-decide --state-file state.md --questions questions.json --json
 ```
 
 `--state-file` holds a concise state (a diff, a test summary, an iteration report) — never the whole repo. `--questions` is a JSON map of question ID to question. Answers come back by question ID. See `examples/launch-readiness/` for a worked example and `docs/question-sets.md` for the full phase-by-phase question library.
+
+## Models
+
+`--model` selects the decision model (default `clef`):
+
+```bash
+bin/clef-decide --state-file state.md --questions questions.json --model clef-flash
+```
+
+- `clef` — the full-size decision model.
+- `clef-flash` — the 9B variant ([model card](https://huggingface.co/Cloudflare/clef-flash)): same SystemOne wire, no free-form generation, built for speed — median request latency 38.8ms vs 209.3ms for `clef` on the Decision Index suite. Pick it for cheap, fast gates; keep `clef` for the highest-stakes verdicts.
+
+Only these two (plus a `:free` suffix spelling, preserved verbatim) are accepted — anything else is rejected, since neither is a chat model. Request shape reference: the [SystemOne quickstart](https://docs.typesafe.ai/introduction/quickstart).
 
 ## How a gate works
 

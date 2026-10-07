@@ -29,7 +29,8 @@ Sheet columns (exact names):
 ## Driving the gates
 
 Every gate is one `bin/clef-decide` call against the question sets in
-`docs/question-sets.md`, with the IDs filled in. Rules for every call:
+`docs/question-sets.md`, with the IDs filled in. Pass `--model clef-flash`
+for the fast 9B variant; the default is `clef`. Rules for every call:
 
 - **State is concise.** Diffs, test summaries, failure records, iteration
   reports. Never the whole repo. The helper refuses anything over the

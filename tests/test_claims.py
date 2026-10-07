@@ -107,6 +107,10 @@ class TestClaimEvidence(unittest.TestCase):
         self.assertEqual(clef.MAX_SCORE_LEVELS, 10)
         self.assertEqual(clef.DEFAULT_TIMEOUT, 60)
 
+    def test_model_allowlist_pinned(self):
+        self.assertEqual(clef.ALLOWED_MODELS, ("clef", "clef-flash"))
+        self.assertEqual(clef.DEFAULT_MODEL, "clef")
+
     def test_helper_is_executable(self):
         self.assertTrue(os.access(BIN_PATH, os.X_OK))
 

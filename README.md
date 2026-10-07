@@ -4,6 +4,19 @@ Clef is a **decision helper for coding agents** — it judges; it does not chat,
 
 The rule of the loop: **the agent is the hands, Clef is the judge.** No gated decision is made on the agent's judgment alone, and no phase exits without its Clef gate passing.
 
+## Verified claims
+
+Every claim below is backed by a test in `tests/` — fully mocked, no network, no key, no charges. Run them yourself: `python3 -m unittest discover -s tests` (16/16 pass, ~0.05s).
+
+| Claim | Backing data |
+|---|---|
+| POSTs only to the one Clef endpoint | `test_request_shape` asserts the exact URL and POST method; `test_endpoint_is_the_only_url_in_source` scans `bin/clef-decide` for any other URL — none exists |
+| API key comes only from `EXPERIENTIAL_API_KEY` | `test_missing_key_stops` (helper refuses without it); `test_key_never_prompted_interactively` (no `input()`/`getpass` anywhere in source) |
+| No retries, no idempotency key | `test_no_retry_on_transport_error`: a failed transport produces exactly 1 attempt, never a resend; `test_no_idempotency_header_sent` |
+| 16,384-token budget enforced before sending | `test_context_budget_refuses`; `test_constants_match_claims` pins the constant |
+| ≤32 questions, ≤64 options, 2–10 score levels | `test_gateway_bounds` exercises each bound; `test_constants_match_claims` pins them |
+| `bin/clef-decide` is executable and stdlib-only | `test_helper_is_executable`; `test_stdlib_only_imports` (imports: argparse, json, os, sys, urllib — nothing else) |
+
 ## Quickstart
 
 ```bash

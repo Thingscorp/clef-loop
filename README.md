@@ -1,8 +1,10 @@
-# clef-loop
+# panel-loop
 
-Clef is a **decision helper for coding agents** — it judges; it does not chat, code, or complete. `clef-loop` wraps it in a **recursive six-phase QA loop**: the agent does the legwork (reads code, writes the test sheet, runs cases, applies fixes) and Clef makes every judgment call — coverage, deduplication, risk triage, failure triage, severity, fix review, regression verdict, confidence, and loop termination.
+A **tribunal of AI decision helpers for coding agents** — four judges, one verdict. `panel-loop` wraps them in a **recursive six-phase QA loop**: the agent does the legwork (reads code, writes the test sheet, runs cases, applies fixes) and the panel makes every judgment call — coverage, deduplication, risk triage, failure triage, severity, fix review, regression verdict, confidence, and loop termination.
 
-The rule of the loop: **the agent is the hands, Clef is the judge.** No gated decision is made on the agent's judgment alone, and no phase exits without its Clef gate passing.
+The judges: **Clef** (the thorough reader), **Clef Flash** (the fast 9B for high-volume gates), **Jev** (risk triage and adversarial second opinions), **Luna** (structured scored audits). Routine gates go to the best-fit judge; the termination verdict goes to the full tribunal — **one judge, one vote, majority wins**.
+
+The rule of the loop: **the agent is the hands, the panel is the judge.** No gated decision is made on the agent's judgment alone, and no phase exits without its gate passing. None of these are chat models — they judge; they do not chat, code, or complete.
 
 ## Verified claims
 
@@ -25,7 +27,7 @@ Every claim below is backed by a test in `tests/` — fully mocked, no network, 
 ```bash
 export CLEF_API_KEY=...   # your key; never committed, never logged
 
-# Ask Clef to judge a state blob against structured questions
+# Ask a judge to decide a state blob against structured questions
 bin/clef-decide --state-file state.md --questions questions.json
 bin/clef-decide --state-file state.md --questions questions.json --json
 ```
@@ -77,9 +79,9 @@ Questions in one request are independent — never chain answers within a reques
 3. **Execution** — run every case; failures gate `triage` (choice: real-defect / bad-test / environment-flake), then `severity` (choice).
 4. **Remediation** — each defect gets a minimal proposed diff; gate `fix_review` (choice: accept / review).
 5. **Regression** — re-run everything; gate `regression_clean` (noul). New failures loop back to phase 3.
-6. **Recursive loop** — write the iteration report; gate `confidence` (score) and `done` (noul). If `done` is false, loop back to phase 1.
+6. **Recursive loop** — write the iteration report (including Luna's fix audits); gate `confidence` (score, `--judge clef`), then the tribunal vote on `done` (`--panel`: one choice question, `done`/`not_done`). Majority wins; a tie re-runs once, a second tie escalates to the owner. If the panel votes `not_done`, loop back to phase 1.
 
-Full workflow: `docs/quality-loop.md`. If Clef doesn't approve, keep trying: re-run the stochastic verdict; if the refusal is stable, strengthen the work or the evidence and re-ask. Never bypass a failed gate silently — and never merge, ship, or call something done on a refused gate without explicit human order.
+Full workflow: `docs/quality-loop.md`. If a judge doesn't approve, keep trying: re-run the stochastic verdict; if the refusal is stable, strengthen the work or the evidence and re-ask. Never bypass a failed gate silently — and never merge, ship, or call something done on a refused gate without explicit human order.
 
 ## Configuration
 

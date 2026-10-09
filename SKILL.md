@@ -1,29 +1,30 @@
 ---
-name: clef-loop
+name: panel-loop
 description: >-
-  Run the 6-phase recursive QA loop with Clef as the decision driver.
+  Run the 6-phase recursive QA loop with a tribunal of AI decision judges.
   The agent does the legwork (reads code, writes the sheet, runs tests,
-  implements fixes); Clef makes every judgment call — coverage, dedup,
+  implements fixes); the panel makes every judgment call — coverage, dedup,
   risk triage, failure triage, severity, fix approval, regression verdict,
-  confidence, and loop termination — through bin/clef-decide. Use when the
-  owner says "let clef drive", "clef-driven QA", or drops Clef into a repo
-  for a full quality pass.
+  confidence, and loop termination — through bin/clef-decide. Judges: Clef,
+  Clef Flash, Jev, Luna; the termination verdict goes to a full tribunal
+  vote. Use when the owner says "let the panel drive", "tribunal QA",
+  or drops panel-loop into a repo for a full quality pass.
 license: MIT
 ---
 
-# clef-loop
+# panel-loop
 
 ## Purpose
 
 Execute the 6-phase recursive quality loop (discover → test → execute →
-fix → regress → repeat) with Clef as the driver. The agent is the hands;
-Clef is the judge. No gated decision is made on the agent's judgment
-alone, and no phase exits without its Clef gate passing.
+fix → regress → repeat) with the tribunal as the driver. The agent is the
+hands; the panel is the judge. No gated decision is made on the agent's
+judgment alone, and no phase exits without its gate passing.
 
 ## Setup
 
 ```bash
-git clone https://github.com/Thingscorp/clef-loop.git
+git clone https://github.com/Thingscorp/panel-loop.git
 export CLEF_API_KEY=...   # or api_key= in ~/.config/clef-decide/config
 ```
 

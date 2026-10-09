@@ -1,4 +1,4 @@
-# The clef-loop quality process
+# The panel-loop quality process
 
 Six phases, recursive. The agent does the legwork; Clef makes every judgment
 call. No gated decision is made on the agent's judgment alone, and no phase

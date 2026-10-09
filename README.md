@@ -8,7 +8,7 @@ The rule of the loop: **the agent is the hands, the panel is the judge.** No gat
 
 ## Verified claims
 
-Every claim below is backed by a test in `tests/` — fully mocked, no network, no key, no charges. Run them yourself: `python3 -m unittest discover -s tests` (48/48 pass, ~0.1s).
+Every claim below is backed by a test in `tests/` — fully mocked, no network, no key, no charges. Run them yourself: `python3 -m unittest discover -s tests` (53/53 pass, ~0.1s).
 
 | Claim | Backing data |
 |---|---|
@@ -21,6 +21,8 @@ Every claim below is backed by a test in `tests/` — fully mocked, no network, 
 | SystemOne model is `clef`, `clef-flash`, or `jev-latest` only (`:free` preserved); anything else rejected | `test_flash_model_sent_exactly`, `test_flash_free_spelling_preserved`, `test_unknown_clef_variant_rejected`, `test_model_allowlist_pinned` |
 | Luna uses the decisions route with the proven choice shape; other types rejected | `test_luna_posts_to_decisions_with_proven_shape`, `test_luna_rejects_non_choice` |
 | Panel: one judge one vote, majority wins, double tie escalates | `test_majority_wins`, `test_tie_reruns_then_decides`, `test_double_tie_escalates` |
+| `--panel` rejects `--judge`/`--model` instead of silently ignoring them | `test_panel_rejects_judge_flag`, `test_panel_rejects_model_flag` |
+| Luna answer-count mismatch is refused, never silently dropped | `test_luna_answer_count_mismatch_raises` |
 
 ## Quickstart
 
@@ -58,7 +60,7 @@ Only `clef`, `clef-flash`, and `jev-latest` (plus a `:free` suffix spelling, pre
 bin/clef-decide --state-file report.md --questions done.json --panel
 ```
 
-`done.json` must hold exactly one choice question, e.g. `{"done": {"type": "choice", "instructions": "...", "criteria": {"done": "...", "not_done": "..."}}}`. Use the panel for the loop-termination gate (phase 6) and other high-stakes verdicts; routine gates stay single-judge.
+`done.json` must hold exactly one choice question, e.g. `{"done": {"type": "choice", "instructions": "...", "criteria": {"done": "...", "not_done": "..."}}}`. Use the panel for the loop-termination gate (phase 6) and other high-stakes verdicts; routine gates stay single-judge. `--panel` cannot be combined with `--judge` or `--model` — it always uses all four judges, and contradictory flags fail loudly instead of being silently ignored.
 
 ## How a gate works
 
@@ -139,7 +141,7 @@ Fully mocked — no network, no key, no charges:
 python3 -m unittest discover -s tests
 ```
 
-48 tests cover request shape, key handling, context budget, gateway bounds, judge routing, the Luna decisions route, panel voting, and error surfacing. Live calls are always opt-in: ask before any potentially charged call, and never claim it worked without a real response.
+53 tests cover request shape, key handling, context budget, gateway bounds, judge routing, the Luna decisions route, panel voting, flag conflicts, and error surfacing. Live calls are always opt-in: ask before any potentially charged call, and never claim it worked without a real response.
 
 ## Layout
 

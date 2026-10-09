@@ -136,11 +136,23 @@ class TestLunaRoute(unittest.TestCase):
         with self.assertRaises(clef.ClefError):
             clef.resolve_luna_endpoint("http://x.test/d")
 
+    def test_luna_answer_count_mismatch_raises(self):
+        def opener(req, timeout=None):
+            return FakeResp({"answers": [{"choice": "done"}]})  # 1 answer, 2 questions
+        two_q = {"a": {"type": "choice", "instructions": "x",
+                       "criteria": {"done": "y", "not_done": "z"}},
+                 "b": {"type": "choice", "instructions": "x",
+                       "criteria": {"done": "y", "not_done": "z"}}}
+        with self.assertRaises(clef.ClefError) as cm:
+            clef.call_judge("luna", "s", two_q, _opener=opener)
+        self.assertIn("2 questions", str(cm.exception))
+
     def test_luna_shares_key_chain(self):
         cap = {}
         def opener(req, timeout=None):
             cap["auth"] = req.get_header("Authorization")
-            return FakeResp({"answers": []})
+            return FakeResp({"answers": [{"choice": "done", "confidence": 0.9,
+                                           "probabilities": []}]})
         with patch.dict(os.environ, {"CLEF_API_KEY": "shared-key"}):
             clef.call_judge("luna", "s", CHOICE_Q, _opener=opener)
         self.assertEqual(cap["auth"], "Bearer " + "shared" + "-key")
@@ -207,6 +219,50 @@ class TestPanelVote(unittest.TestCase):
         human = clef.render_panel(res)
         self.assertIn("winner: done", human)
         self.assertIn("clef=done", human)
+
+
+class TestPanelFlagConflict(unittest.TestCase):
+    def _files(self):
+        import tempfile
+        sf = tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False)
+        sf.write("state"); sf.close()
+        qf = tempfile.NamedTemporaryFile("w", suffix=".json", delete=False)
+        json.dump(CHOICE_Q, qf); qf.close()
+        self.addCleanup(os.unlink, sf.name)
+        self.addCleanup(os.unlink, qf.name)
+        return sf.name, qf.name
+
+    def test_panel_rejects_judge_flag(self):
+        s, q = self._files()
+        with patch.object(clef, "panel_vote") as pv:
+            rc = clef.main(["--state-file", s, "--questions", q,
+                            "--panel", "--judge", "luna"])
+        self.assertEqual(rc, 2)
+        pv.assert_not_called()
+
+    def test_panel_rejects_model_flag(self):
+        s, q = self._files()
+        with patch.object(clef, "panel_vote") as pv:
+            rc = clef.main(["--state-file", s, "--questions", q,
+                            "--panel", "--model", "clef-flash"])
+        self.assertEqual(rc, 2)
+        pv.assert_not_called()
+
+    def test_panel_alone_reaches_vote(self):
+        s, q = self._files()
+        res = {"qid": "done", "options": ["done", "not_done"], "rounds": [],
+               "winner": "done", "tie": False, "mean_probabilities": {}}
+        with patch.object(clef, "panel_vote", return_value=res) as pv:
+            rc = clef.main(["--state-file", s, "--questions", q, "--panel"])
+        self.assertEqual(rc, 0)
+        pv.assert_called_once()
+
+    def test_default_judge_is_clef(self):
+        s, q = self._files()
+        with patch.object(clef, "call_judge",
+                          return_value=({"answers": {}}, 1)) as cj:
+            clef.main(["--state-file", s, "--questions", q])
+        self.assertEqual(cj.call_args[0][0], "clef")
 
 
 if __name__ == "__main__":

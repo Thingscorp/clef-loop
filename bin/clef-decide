@@ -310,8 +310,13 @@ def call_luna(state, questions, timeout=DEFAULT_TIMEOUT,
         ],
     }
     payload = _post(url, key, body, timeout, _opener)
+    raw_answers = payload.get("answers", [])
+    if len(raw_answers) != len(questions):
+        raise ClefError(
+            f"Luna decisions route returned {len(raw_answers)} answers for "
+            f"{len(questions)} questions; refusing to guess the mapping")
     answers = {}
-    for qid, ans in zip(questions.keys(), payload.get("answers", [])):
+    for qid, ans in zip(questions.keys(), raw_answers):
         answers[qid] = {
             "type": "choice",
             "choice": ans.get("choice"),
@@ -455,8 +460,8 @@ def main(argv):
     ap = argparse.ArgumentParser(description="Clef decision helper (SystemOne). Never a chat model.")
     ap.add_argument("--state-file", required=True, help="file with the state text (concise diff + test summary)")
     ap.add_argument("--questions", required=True, help="JSON file: map of question ID -> question")
-    ap.add_argument("--judge", default="clef", choices=JUDGES,
-                    help="which judge drives (default clef; luna uses the decisions route, choice only)")
+    ap.add_argument("--judge", default=None, choices=JUDGES,
+                    help="which judge drives (default: clef; luna uses the decisions route, choice only)")
     ap.add_argument("--panel", action="store_true",
                     help="tribunal vote: all four judges vote on one choice question, majority wins")
     ap.add_argument("--model", default=None,
@@ -477,6 +482,9 @@ def main(argv):
         with open(args.questions, "r", encoding="utf-8") as f:
             questions = json.load(f)
         if args.panel:
+            if args.judge is not None or args.model is not None:
+                raise ClefError("--panel uses all four judges; it cannot be "
+                                "combined with --judge or --model")
             result = panel_vote(state, questions, timeout=args.timeout,
                                 api_key=args.api_key, endpoint=args.endpoint,
                                 luna_endpoint=args.luna_endpoint)
@@ -485,7 +493,7 @@ def main(argv):
             else:
                 print(render_panel(result))
             return 0 if result["winner"] else 2
-        payload, _est = call_judge(args.judge, state, questions,
+        payload, _est = call_judge(args.judge or "clef", state, questions,
                                    timeout=args.timeout,
                                    api_key=args.api_key,
                                    endpoint=args.endpoint,

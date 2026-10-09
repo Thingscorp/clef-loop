@@ -382,12 +382,20 @@ def panel_vote(state, questions, timeout=DEFAULT_TIMEOUT, api_key=None,
         j, state_text, qid, question, timeout, api_key,
         endpoint, luna_endpoint, config_path, _opener))
 
+    def attributed(judge):
+        try:
+            return vote_fn(judge)
+        except ClefError as e:
+            raise ClefError(f"[{judge}] {e}")
+        except Exception as e:  # noqa: BLE001 — attribute, don't swallow
+            raise ClefError(f"[{judge}] unexpected error: {e}")
+
     import concurrent.futures as cf
     rounds = []
     for _ in range(2):
         votes, probs = {}, {}
         with cf.ThreadPoolExecutor(max_workers=len(JUDGES)) as ex:
-            futs = {ex.submit(vote_fn, j): j for j in JUDGES}
+            futs = {ex.submit(attributed, j): j for j in JUDGES}
             for f in cf.as_completed(futs):
                 j = futs[f]
                 choice, p = f.result()

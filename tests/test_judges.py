@@ -213,6 +213,26 @@ class TestPanelVote(unittest.TestCase):
             clef.panel_vote("s", {"q": {"type": "noul", "instructions": "x"}},
                             _judge_fn=ballot({}))
 
+    def test_panel_error_names_the_judge(self):
+        def fn(judge):
+            if judge == "jev":
+                raise clef.ClefError("transport boom")
+            return "done", {"done": 0.9, "not_done": 0.1}
+        with self.assertRaises(clef.ClefError) as cm:
+            clef.panel_vote("s", CHOICE_Q, _judge_fn=fn)
+        self.assertIn("[jev]", str(cm.exception))
+        self.assertIn("transport boom", str(cm.exception))
+
+    def test_panel_error_before_any_round_completes(self):
+        # a judge failure aborts the vote; it is not a tie and never re-runs
+        calls = {"n": 0}
+        def fn(judge):
+            calls["n"] += 1
+            raise clef.ClefError("down")
+        with self.assertRaises(clef.ClefError):
+            clef.panel_vote("s", CHOICE_Q, _judge_fn=fn)
+        self.assertLessEqual(calls["n"], 4)
+
     def test_render_panel_shows_votes(self):
         res = clef.panel_vote("s", CHOICE_Q, _judge_fn=ballot(
             {"clef": "done", "clef-flash": "done", "jev": "done", "luna": "done"}))

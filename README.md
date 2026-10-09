@@ -8,7 +8,7 @@ The rule of the loop: **the agent is the hands, the panel is the judge.** No gat
 
 ## Verified claims
 
-Every claim below is backed by a test in `tests/` — fully mocked, no network, no key, no charges. Run them yourself: `python3 -m unittest discover -s tests` (53/53 pass, ~0.1s).
+Every claim below is backed by a test in `tests/` — fully mocked, no network, no key, no charges. Run them yourself: `python3 -m unittest discover -s tests` (55/55 pass, ~0.1s).
 
 | Claim | Backing data |
 |---|---|
@@ -23,6 +23,7 @@ Every claim below is backed by a test in `tests/` — fully mocked, no network, 
 | Panel: one judge one vote, majority wins, double tie escalates | `test_majority_wins`, `test_tie_reruns_then_decides`, `test_double_tie_escalates` |
 | `--panel` rejects `--judge`/`--model` instead of silently ignoring them | `test_panel_rejects_judge_flag`, `test_panel_rejects_model_flag` |
 | Luna answer-count mismatch is refused, never silently dropped | `test_luna_answer_count_mismatch_raises` |
+| Panel worker errors name the failing judge | `test_panel_error_names_the_judge`, `test_panel_error_before_any_round_completes` |
 
 ## Quickstart
 
@@ -141,7 +142,7 @@ Fully mocked — no network, no key, no charges:
 python3 -m unittest discover -s tests
 ```
 
-53 tests cover request shape, key handling, context budget, gateway bounds, judge routing, the Luna decisions route, panel voting, flag conflicts, and error surfacing. Live calls are always opt-in: ask before any potentially charged call, and never claim it worked without a real response.
+55 tests cover request shape, key handling, context budget, gateway bounds, judge routing, the Luna decisions route, panel voting, flag conflicts, and error surfacing. Live calls are always opt-in: ask before any potentially charged call, and never claim it worked without a real response.
 
 ## Layout
 

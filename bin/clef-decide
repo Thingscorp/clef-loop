@@ -5,9 +5,21 @@ Clef is a DECISION HELPER, not a chat model. It answers structured questions
 (choice / noul / score) about a state blob. It does not generate chat
 completions and must never be used as the coding agent's primary model.
 
+Four judges can drive the loop, each with a native route (--judge):
+  clef       SystemOne, the thorough reader (default)
+  clef-flash SystemOne, 9B, fast — high-volume cheap gates
+  jev        SystemOne, risk triage and adversarial second opinions
+  luna       the /v1/decisions route, structured scored audits (choice only)
+
+--panel fans one choice question out to all four judges in parallel.
+Tribunal rule, borrowed from the pgeon tribunal: one judge, one vote;
+majority wins; a tie re-runs once, then escalates (exit 2, no auto-pick).
+
 Hard rules (from the integration spec):
 - POST only to the Clef endpoint (default
-  https://api.experientiallabs.ai/v1/systemone; overridable, see below)
+  https://api.experientiallabs.ai/v1/systemone; overridable, see below).
+  Luna POSTs only to the decisions endpoint (default
+  https://api.experientiallabs.ai/v1/decisions; overridable).
 - Bearer key from standard config, in this precedence:
     1. --api-key flag
     2. $CLEF_API_KEY environment variable
@@ -16,23 +28,29 @@ Hard rules (from the integration spec):
   Missing everywhere: stops with setup instructions. The key is never
   requested interactively, never logged. Prefer the env var or config
   file — a CLI flag can appear in shell history and process listings.
-- Model sent as "clef" or "clef-flash" exactly (a ":free" suffix spelling
-  is preserved if explicitly selected). Anything else is rejected — these
-  are decision helpers, not chat models.
+- Model sent as "clef", "clef-flash", or "jev-latest" exactly (a ":free"
+  suffix spelling is preserved if explicitly selected). Anything else is
+  rejected — these are decision helpers, not chat models. Luna's model is
+  fixed: gpt-6-luna-decisions.
 - No retries, no Idempotency-Key: an unknown outcome may already be charged.
+  (The panel's single tie re-run is a new vote, not a retried request.)
 - Bounded timeout. HTTP/transport errors surface, nothing is hidden.
 - Clef context budget: 16,384 tokens shared by state + question definitions.
+  Applied to Luna calls too (conservative; the decisions budget is unpinned).
 - Gateway admission bounds: <=32 questions, <=64 options per choice,
   2-10 levels per score.
 
 Usage:
     export CLEF_API_KEY=...
     clef-decide --state-file diff.md --questions questions.json
+    clef-decide --state-file diff.md --questions questions.json --judge jev
+    clef-decide --state-file report.md --questions done.json --panel
     clef-decide --state-file diff.md --questions questions.json --model clef:free --json
 
 Config file (~/.config/clef-decide/config), KEY=VALUE lines, # comments:
     api_key=...
-    endpoint=https://...
+    endpoint=https://...       (SystemOne route)
+    luna_endpoint=https://...  (decisions route)
 
 questions.json shape:
     {
@@ -42,6 +60,9 @@ questions.json shape:
       "risk":   {"type": "score", "instructions": "...",
                  "criteria": ["none", "low", "high"]}
     }
+
+Panel mode: questions.json must hold exactly one choice question
+(the verdict, e.g. done / not_done).
 """
 import json
 import os
@@ -50,13 +71,19 @@ import urllib.request
 import urllib.error
 
 ENDPOINT = "https://api.experientiallabs.ai/v1/systemone"
+LUNA_ENDPOINT = "https://api.experientiallabs.ai/v1/decisions"
+LUNA_MODEL = "gpt-6-luna-decisions"
+JEV_MODEL = "jev-latest"
 KEY_ENV = "CLEF_API_KEY"
 LEGACY_KEY_ENV = "EXPERIENTIAL_API_KEY"
 ENDPOINT_ENV = "CLEF_ENDPOINT"
+LUNA_ENDPOINT_ENV = "LUNA_ENDPOINT"
 DEFAULT_CONFIG_PATH = os.path.join(
     os.path.expanduser("~"), ".config", "clef-decide", "config")
 DEFAULT_MODEL = "clef"
-ALLOWED_MODELS = ("clef", "clef-flash")
+JUDGES = ("clef", "clef-flash", "jev", "luna")
+JUDGE_DEFAULT_MODEL = {"clef": "clef", "clef-flash": "clef-flash", "jev": JEV_MODEL}
+ALLOWED_MODELS = ("clef", "clef-flash", "jev-latest")
 DEFAULT_TIMEOUT = 60
 
 MAX_CONTEXT_TOKENS = 16384
@@ -171,24 +198,47 @@ def resolve_endpoint(flag_value=None, config_path=None):
     return ep
 
 
-def call_clef(model, state, questions, timeout=DEFAULT_TIMEOUT,
-              api_key=None, endpoint=None, config_path=None, _opener=None):
-    """POST to the Clef endpoint. No retries. Surfaces all errors."""
-    key = resolve_key(api_key, config_path)
-    url = resolve_endpoint(endpoint, config_path)
+def resolve_luna_endpoint(flag_value=None, config_path=None):
+    """Decisions-route precedence: flag > $LUNA_ENDPOINT > config file > default."""
+    if flag_value:
+        ep = flag_value
+    elif os.environ.get(LUNA_ENDPOINT_ENV):
+        ep = os.environ[LUNA_ENDPOINT_ENV]
+    else:
+        ep = read_config_file(config_path).get("luna_endpoint") or LUNA_ENDPOINT
+    if not ep.startswith("https://"):
+        raise ClefError(f"luna endpoint must be an https:// URL (got {ep!r})")
+    return ep
+
+
+def resolve_judge(judge, model_flag=None):
+    """Map --judge to (route, model). route is 'systemone' or 'decisions'.
+
+    --model overrides the SystemOne model string (still allowlisted).
+    Luna's model is fixed; --model with --judge luna is rejected.
+    """
+    if judge not in JUDGES:
+        raise ClefError(f"judge must be one of {JUDGES} (got {judge!r})")
+    if judge == "luna":
+        if model_flag is not None:
+            raise ClefError("--model cannot be combined with --judge luna "
+                            f"(Luna's model is fixed: {LUNA_MODEL})")
+        return ("decisions", LUNA_MODEL)
+    model = model_flag or JUDGE_DEFAULT_MODEL[judge]
     base = model.split(":")[0]
     if base not in ALLOWED_MODELS:
         raise ClefError(
             f"model must be one of {ALLOWED_MODELS} (got {model!r}); "
-            "Clef is a decision helper, not a chat model")
-    validate_questions(questions)
-    state_text = state if isinstance(state, str) else json.dumps(state, sort_keys=True)
-    est = check_context_budget(state_text, questions)
+            "these are decision helpers, not chat models")
+    return ("systemone", model)
 
-    body = json.dumps(build_body(model, state, questions)).encode("utf-8")
+
+def _post(url, key, body, timeout, _opener=None):
+    """Single POST. No retries by design: an unknown outcome may be charged."""
+    data = json.dumps(body).encode("utf-8")
     req = urllib.request.Request(
         url,
-        data=body,
+        data=data,
         method="POST",
         headers={
             "Authorization": f"Bearer {key}",
@@ -197,7 +247,6 @@ def call_clef(model, state, questions, timeout=DEFAULT_TIMEOUT,
     )
     opener = _opener or urllib.request.urlopen
     try:
-        # No retries by design: an unknown outcome may already be charged.
         with opener(req, timeout=timeout) as resp:
             raw = resp.read().decode("utf-8")
     except urllib.error.HTTPError as e:
@@ -208,10 +257,177 @@ def call_clef(model, state, questions, timeout=DEFAULT_TIMEOUT,
     except TimeoutError:
         raise ClefError(f"request to {url} timed out after {timeout}s (no retry: outcome unknown)")
     try:
-        payload = json.loads(raw)
+        return json.loads(raw)
     except json.JSONDecodeError:
-        raise ClefError(f"non-JSON response from {ENDPOINT}: {raw[:500]}")
+        raise ClefError(f"non-JSON response from {url}: {raw[:500]}")
+
+
+def call_clef(model, state, questions, timeout=DEFAULT_TIMEOUT,
+              api_key=None, endpoint=None, config_path=None, _opener=None):
+    """POST to the SystemOne endpoint. No retries. Surfaces all errors."""
+    key = resolve_key(api_key, config_path)
+    url = resolve_endpoint(endpoint, config_path)
+    base = model.split(":")[0]
+    if base not in ALLOWED_MODELS:
+        raise ClefError(
+            f"model must be one of {ALLOWED_MODELS} (got {model!r}); "
+            "these are decision helpers, not chat models")
+    validate_questions(questions)
+    state_text = state if isinstance(state, str) else json.dumps(state, sort_keys=True)
+    est = check_context_budget(state_text, questions)
+    payload = _post(url, key, build_body(model, state, questions), timeout, _opener)
     return payload, est
+
+
+def call_luna(state, questions, timeout=DEFAULT_TIMEOUT,
+              api_key=None, luna_endpoint=None, config_path=None, _opener=None):
+    """POST to the decisions endpoint (Luna's native route). Choice only.
+
+    The decisions shape is proven, not guessed: model, input, and a list of
+    choice questions with value/description options. noul/score are rejected
+    with a pointer to the SystemOne judges. Response is normalized to the
+    SystemOne answers shape so render_human works unchanged.
+    """
+    key = resolve_key(api_key, config_path)
+    url = resolve_luna_endpoint(luna_endpoint, config_path)
+    validate_questions(questions)
+    for qid, q in questions.items():
+        if q.get("type") != "choice":
+            raise ClefError(
+                f"question '{qid}': the Luna decisions route supports choice "
+                "questions only; use a SystemOne judge (clef, clef-flash, jev) "
+                f"for {q.get('type')}")
+    state_text = state if isinstance(state, str) else json.dumps(state, sort_keys=True)
+    est = check_context_budget(state_text, questions)
+    body = {
+        "model": LUNA_MODEL,
+        "input": state,
+        "questions": [
+            {"type": "choice", "name": qid, "instructions": q["instructions"],
+             "choices": [{"value": k, "description": v}
+                         for k, v in q["criteria"].items()]}
+            for qid, q in questions.items()
+        ],
+    }
+    payload = _post(url, key, body, timeout, _opener)
+    answers = {}
+    for qid, ans in zip(questions.keys(), payload.get("answers", [])):
+        answers[qid] = {
+            "type": "choice",
+            "choice": ans.get("choice"),
+            "confidence": ans.get("confidence"),
+            "probabilities": _probs_dict(ans.get("probabilities", {})),
+        }
+    payload["answers"] = answers
+    return payload, est
+
+
+def _probs_dict(probs):
+    """Normalize probabilities to {option: float}, list or dict form."""
+    if isinstance(probs, list):
+        return {p["value"]: p["probability"] for p in probs}
+    return dict(probs)
+
+
+def call_judge(judge, state, questions, timeout=DEFAULT_TIMEOUT,
+               api_key=None, endpoint=None, luna_endpoint=None,
+               config_path=None, model=None, _opener=None):
+    """Dispatch to the judge's native route. Returns (payload, est)."""
+    route, resolved_model = resolve_judge(judge, model)
+    if route == "decisions":
+        return call_luna(state, questions, timeout, api_key, luna_endpoint,
+                         config_path, _opener)
+    return call_clef(resolved_model, state, questions, timeout, api_key,
+                     endpoint, config_path, _opener)
+
+
+def _judge_vote(judge, state_text, qid, question, timeout, api_key,
+                endpoint, luna_endpoint, config_path, _opener):
+    """One judge, one vote: weigh natively, return (choice, probs dict)."""
+    payload, _ = call_judge(judge, state_text, {qid: question}, timeout,
+                            api_key, endpoint, luna_endpoint, config_path,
+                            _opener=_opener)
+    ans = payload["answers"][qid]
+    return ans.get("choice"), _probs_dict(ans.get("probabilities", {}))
+
+
+def panel_vote(state, questions, timeout=DEFAULT_TIMEOUT, api_key=None,
+               endpoint=None, luna_endpoint=None, config_path=None,
+               _opener=None, _judge_fn=None):
+    """Tribunal vote over exactly one choice question.
+
+    Every judge weighs the question on its native route and casts one vote.
+    Majority wins. A tie re-runs once (new votes, not retried requests);
+    a second tie escalates: winner is None and the caller must not auto-pick.
+    Returns a dict with qid, options, rounds, votes, counts, winner, tie,
+    and mean_probabilities.
+    """
+    if not isinstance(questions, dict) or len(questions) != 1:
+        raise ClefError("--panel needs exactly one question in the questions file")
+    qid, question = next(iter(questions.items()))
+    if question.get("type") != "choice":
+        raise ClefError("--panel needs a choice question "
+                        f"(got {question.get('type')!r} for '{qid}')")
+    validate_questions(questions)
+    state_text = state if isinstance(state, str) else json.dumps(state, sort_keys=True)
+    check_context_budget(state_text, questions)
+    options = list(question["criteria"].keys())
+
+    vote_fn = _judge_fn or (lambda j: _judge_vote(
+        j, state_text, qid, question, timeout, api_key,
+        endpoint, luna_endpoint, config_path, _opener))
+
+    import concurrent.futures as cf
+    rounds = []
+    for _ in range(2):
+        votes, probs = {}, {}
+        with cf.ThreadPoolExecutor(max_workers=len(JUDGES)) as ex:
+            futs = {ex.submit(vote_fn, j): j for j in JUDGES}
+            for f in cf.as_completed(futs):
+                j = futs[f]
+                choice, p = f.result()
+                votes[j] = choice
+                probs[j] = p
+        counts = {}
+        for c in votes.values():
+            counts[c] = counts.get(c, 0) + 1
+        rounds.append({"votes": votes, "counts": counts})
+        top = max(counts.values())
+        leaders = [c for c, n in counts.items() if n == top]
+        if len(leaders) == 1:
+            break
+
+    final = rounds[-1]
+    top = max(final["counts"].values())
+    leaders = [c for c, n in final["counts"].items() if n == top]
+    mean = {}
+    for opt in options:
+        vals = [probs.get(j, {}).get(opt, 0.0) for j in JUDGES]
+        mean[opt] = round(sum(vals) / len(vals), 3)
+    return {
+        "qid": qid,
+        "options": options,
+        "rounds": rounds,
+        "winner": leaders[0] if len(leaders) == 1 else None,
+        "tie": len(leaders) > 1,
+        "mean_probabilities": mean,
+    }
+
+
+def render_panel(result):
+    """Human-readable tribunal report."""
+    lines = [f"[panel:{result['qid']}]"]
+    for i, rnd in enumerate(result["rounds"], 1):
+        v = ", ".join(f"{j}={c}" for j, c in sorted(rnd["votes"].items()))
+        lines.append(f"  round {i}: {v}")
+    if result["tie"]:
+        lines.append("  TIE after 2 rounds — escalate to the owner, do not auto-pick.")
+    else:
+        lines.append(f"  winner: {result['winner']}")
+    mp = ", ".join(f"{k}={v}" for k, v in result["mean_probabilities"].items())
+    lines.append(f"  mean probabilities: {mp}")
+    lines.append("note: probabilities/confidence are not guarantees of correctness.")
+    return "\n".join(lines)
 
 
 def render_human(payload):
@@ -239,13 +455,19 @@ def main(argv):
     ap = argparse.ArgumentParser(description="Clef decision helper (SystemOne). Never a chat model.")
     ap.add_argument("--state-file", required=True, help="file with the state text (concise diff + test summary)")
     ap.add_argument("--questions", required=True, help="JSON file: map of question ID -> question")
-    ap.add_argument("--model", default=DEFAULT_MODEL,
-                    help="clef or clef-flash (sent exactly; a :free suffix spelling is preserved)")
+    ap.add_argument("--judge", default="clef", choices=JUDGES,
+                    help="which judge drives (default clef; luna uses the decisions route, choice only)")
+    ap.add_argument("--panel", action="store_true",
+                    help="tribunal vote: all four judges vote on one choice question, majority wins")
+    ap.add_argument("--model", default=None,
+                    help="SystemOne model override (clef, clef-flash, jev-latest; :free preserved). Not for luna.")
     ap.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT, help="bounded seconds (no retries)")
     ap.add_argument("--api-key", default=None,
                     help="Bearer key (highest precedence; prefer $CLEF_API_KEY or the config file — flags can leak into shell history)")
     ap.add_argument("--endpoint", default=None,
-                    help=f"Clef endpoint URL (default {ENDPOINT})")
+                    help=f"SystemOne endpoint URL (default {ENDPOINT})")
+    ap.add_argument("--luna-endpoint", default=None,
+                    help=f"decisions endpoint URL for Luna (default {LUNA_ENDPOINT})")
     ap.add_argument("--json", action="store_true", help="print raw response JSON instead of human summary")
     args = ap.parse_args(argv)
 
@@ -254,10 +476,21 @@ def main(argv):
             state = f.read()
         with open(args.questions, "r", encoding="utf-8") as f:
             questions = json.load(f)
-        payload, _est = call_clef(args.model, state, questions,
-                                  timeout=args.timeout,
-                                  api_key=args.api_key,
-                                  endpoint=args.endpoint)
+        if args.panel:
+            result = panel_vote(state, questions, timeout=args.timeout,
+                                api_key=args.api_key, endpoint=args.endpoint,
+                                luna_endpoint=args.luna_endpoint)
+            if args.json:
+                print(json.dumps(result, indent=2))
+            else:
+                print(render_panel(result))
+            return 0 if result["winner"] else 2
+        payload, _est = call_judge(args.judge, state, questions,
+                                   timeout=args.timeout,
+                                   api_key=args.api_key,
+                                   endpoint=args.endpoint,
+                                   luna_endpoint=args.luna_endpoint,
+                                   model=args.model)
     except ClefError as e:
         print(f"clef-decide: {e}", file=sys.stderr)
         return 2

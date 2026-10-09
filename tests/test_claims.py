@@ -64,15 +64,17 @@ class TestClaimEvidence(unittest.TestCase):
     def tearDown(self):
         self.env.stop()
 
-    def test_endpoint_is_the_only_real_url_in_source(self):
+    def test_endpoints_are_the_only_real_urls_in_source(self):
         raw = set(re.findall(r"https?://[^\s\"']+", SOURCE))
         # strip trailing punctuation picked up from prose; drop placeholders
         urls = {u.rstrip(";,).") for u in raw}
         urls = {u for u in urls if "..." not in u and "example" not in u
                 and u not in {"https://", "http://"}}  # bare scheme checks in code
-        self.assertEqual(urls, {"https://api.experientiallabs.ai/v1/systemone"},
+        self.assertEqual(urls, {"https://api.experientiallabs.ai/v1/systemone",
+                                "https://api.experientiallabs.ai/v1/decisions"},
                          f"unexpected URLs in source: {urls}")
         self.assertEqual(clef.ENDPOINT, "https://api.experientiallabs.ai/v1/systemone")
+        self.assertEqual(clef.LUNA_ENDPOINT, "https://api.experientiallabs.ai/v1/decisions")
 
     def test_no_retry_on_transport_error(self):
         cap = {}
@@ -108,7 +110,9 @@ class TestClaimEvidence(unittest.TestCase):
         self.assertEqual(clef.DEFAULT_TIMEOUT, 60)
 
     def test_model_allowlist_pinned(self):
-        self.assertEqual(clef.ALLOWED_MODELS, ("clef", "clef-flash"))
+        self.assertEqual(clef.ALLOWED_MODELS, ("clef", "clef-flash", "jev-latest"))
+        self.assertEqual(clef.JUDGES, ("clef", "clef-flash", "jev", "luna"))
+        self.assertEqual(clef.LUNA_MODEL, "gpt-6-luna-decisions")
         self.assertEqual(clef.DEFAULT_MODEL, "clef")
 
     def test_helper_is_executable(self):

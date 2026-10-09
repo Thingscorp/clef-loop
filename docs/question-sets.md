@@ -7,9 +7,33 @@ Call pattern:
 
 ```bash
 bin/clef-decide --state-file state.json --questions questions.json
+bin/clef-decide --state-file state.json --questions questions.json --judge jev
+bin/clef-decide --state-file report.md --questions done.json --panel
 ```
 
 `--model` is sent exactly as given, so a `clef:free` spelling survives verbatim.
+
+## Default judge per phase
+
+Specialize: one judge, one strength. Routine gates stay single-judge;
+the panel (`--panel`) is for the loop-termination verdict and other
+high-stakes calls.
+
+| Phase | Gate | Judge | Why |
+|---|---|---|---|
+| 1 discovery | `coverage` (noul) | `clef` | nuanced judgment about what's missing |
+| 1 discovery | `dedup_<pair>` (choice) | `clef-flash` | high-volume binary calls, speed wins |
+| 2 risk triage | `risk_<F-ID>` (score) | `jev` | risk scoring is Jev's home turf |
+| 3 triage | `triage_<T-ID>` (choice) | `clef-flash` | high-volume three-way classification |
+| 3 severity | `severity_<D-ID>` (choice) | `clef` | severity needs the thorough reader |
+| 4 fix review | `fix_review_<D-ID>` (choice) | `clef` | fix approval stays with Clef |
+| 4 fix audit | (record) | `luna` | scored audit appended to the iteration report |
+| 5 regression | `regression_clean` (noul) | `clef-flash` | fast re-verdict |
+| 5 adversarial | `slipped_<area>` (choice) | `jev` | "what could still be broken?" |
+| 6 termination | `done` (choice) | `--panel` | one judge one vote, majority wins |
+
+Luna takes choice questions only; give her the fix audit as a choice
+(`sound` / `needs_work`) and keep her scored rationale in the report.
 
 ---
 
@@ -196,3 +220,28 @@ If `done` is false, loop back to Phase 1. If Clef refuses `done`,
 keep trying: re-run the verdict; if the refusal is stable, strengthen
 the work (more discovery, more fixes) and re-ask. The sheet must agree
 mechanically — both must say go before anything is called done.
+
+### Panel variant (recommended for termination)
+
+`--panel` needs exactly one choice question. Reframe `done` as a choice
+and let the tribunal vote — one judge, one vote, majority wins:
+
+```json
+{
+  "done": {
+    "type": "choice",
+    "instructions": "ALL of the following are true — no undiscovered features, no failing tests, no open critical defects, no open high-severity defects, no unresolved UX issues, no incomplete user journeys. The iteration report and sheet summary are in state. Vote done only if every criterion is satisfied.",
+    "criteria": {
+      "done": "Every exit criterion is satisfied; the loop may stop",
+      "not_done": "At least one exit criterion is not satisfied; the loop must continue"
+    }
+  }
+}
+```
+
+```bash
+bin/clef-decide --state-file report.md --questions done.json --panel
+```
+
+A tie re-runs once; a second tie escalates to the owner (exit 2) —
+never auto-pick, never call it done on a tie.

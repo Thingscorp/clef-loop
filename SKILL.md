@@ -43,9 +43,11 @@ Status, Defect Count, Severity, Notes, Last Tested Date. IDs `F-001`,
 `D-001`, sequential, never reused. Status: `undiscovered` | `documented` |
 `tests-written` | `tested` | `failing` | `fixed` | `waived` | `regressed`.
 
-**Driving.** Every gate is one `bin/clef-decide` call (add `--model clef-flash`
-for the fast 9B variant; default is `clef`). Concrete question sets live in
-`docs/question-sets.md` — use them verbatim, filling in the IDs. Rules for every call:
+**Driving.** Every gate is one `bin/clef-decide` call. Concrete question sets live in
+`docs/question-sets.md` — use them verbatim, filling in the IDs, with the
+default judge per phase from the table there (`--judge clef|clef-flash|jev|luna`;
+default `clef`). Luna takes choice questions only and POSTs to the decisions
+route; her scored audit goes into the iteration report. Rules for every call:
 
 - State is concise: diffs, test summaries, failure records, iteration
   reports. Never the whole repo. Budget is 16384 tokens shared by state
@@ -96,11 +98,14 @@ journeys. New failures become new D-IDs (back to Phase 3). Exit:
 
 **Phase 6 — Recursive loop.** Write the iteration report next to the
 sheet: coverage summary, features tested, defects found, defects fixed,
-remaining risks. Gate `confidence` (score) and `done` (noul: ALL exit
-criteria true — no undiscovered features, no failing tests, no open
-critical/high defects, no unresolved UX issues, no incomplete journeys).
-The sheet must agree mechanically; both must say go. If `done` is false,
-loop back to Phase 1. Never declare completion unless all exit criteria
+remaining risks, plus Luna's fix audits. Gate `confidence` (score,
+`--judge clef`) and the tribunal vote:
+`bin/clef-decide --state-file report.md --questions done.json --panel`
+(one choice question, `done`/`not_done`; one judge one vote, majority
+wins). A tie re-runs once; a second tie escalates to the owner — never
+auto-pick, never call it done on a tie.
+The sheet must agree mechanically; both must say go. If the panel votes
+`not_done`, loop back to Phase 1. Never declare completion unless all exit criteria
 are satisfied. A high confidence score with open highs is a lie — fix
 the sheet first.
 

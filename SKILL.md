@@ -63,6 +63,13 @@ route; her scored audit goes into the iteration report. Rules for every call:
   the evidence and re-run. Never bypass a failed gate silently, and never
   merge, ship, or close on a refused gate without the owner's explicit
   order.
+- When a gate's evidence is too large for one request's context budget, or
+  its sub-judgments are genuinely independent, use `--sot`: you propose
+  the skeleton (one file, point ID → question), each point is judged in
+  its own request in parallel, and one goal question aggregates the
+  per-point verdicts. Add `--final-panel` when the goal itself deserves
+  the tribunal.
+  `bin/clef-decide --sot --state-file report.md --skeleton-file skeleton.json --goal-file goal.json`
 
 **Phase 1 — Feature discovery.** Agent inventories from surfaces (routes,
 screens, workflows, APIs, configs, permissions, empty/error states,

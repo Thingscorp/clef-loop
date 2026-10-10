@@ -8,7 +8,7 @@ The rule of the loop: **the agent is the hands, the panel is the judge.** No gat
 
 ## Verified claims
 
-Every claim below is backed by a test in `tests/` — fully mocked, no network, no key, no charges. Run them yourself: `python3 -m unittest discover -s tests` (55/55 pass, ~0.1s).
+Every claim below is backed by a test in `tests/` — fully mocked, no network, no key, no charges. Run them yourself: `python3 -m unittest discover -s tests` (72/72 pass, ~0.1s).
 
 | Claim | Backing data |
 |---|---|
@@ -24,6 +24,11 @@ Every claim below is backed by a test in `tests/` — fully mocked, no network, 
 | `--panel` rejects `--judge`/`--model` instead of silently ignoring them | `test_panel_rejects_judge_flag`, `test_panel_rejects_model_flag` |
 | Luna answer-count mismatch is refused, never silently dropped | `test_luna_answer_count_mismatch_raises` |
 | Panel worker errors name the failing judge | `test_panel_error_names_the_judge`, `test_panel_error_before_any_round_completes` |
+| `--sot`: each skeleton point is judged in its own single-question request, in parallel | `test_each_point_is_its_own_request`, `test_skeleton_order_preserved` |
+| The aggregation goal's state carries every point's verdict | `test_goal_state_carries_point_verdicts` |
+| A failing skeleton point names itself (`[skeleton:<id>]`) | `test_error_names_failing_point`, `test_context_budget_per_request` |
+| `--sot` rejects `--questions`/`--panel`; the goal file must hold exactly one question; goal IDs cannot collide with skeleton IDs | `test_sot_rejects_questions_flag`, `test_sot_rejects_panel_flag`, `test_sot_needs_skeleton_and_goal_files`, `test_goal_must_be_single_question`, `test_goal_id_collision_rejected` |
+| `--final-panel` sends the goal to the full tribunal; a tie exits 2, a winner exits 0 | `test_final_panel_uses_tribunal`, `test_final_panel_tie_exits_2`, `test_final_panel_winner_exits_0` |
 
 ## Quickstart
 
@@ -62,6 +67,23 @@ bin/clef-decide --state-file report.md --questions done.json --panel
 ```
 
 `done.json` must hold exactly one choice question, e.g. `{"done": {"type": "choice", "instructions": "...", "criteria": {"done": "...", "not_done": "..."}}}`. Use the panel for the loop-termination gate (phase 6) and other high-stakes verdicts; routine gates stay single-judge. `--panel` cannot be combined with `--judge` or `--model` — it always uses all four judges, and contradictory flags fail loudly instead of being silently ignored.
+
+### Skeleton-of-judgment
+
+`--sot` implements skeleton-of-thought for decision models: the agent proposes a skeleton of independent sub-questions, each point is judged in its own request in parallel, and a final gate aggregates the per-point verdicts into one goal question. The judges judge; they do not invent the skeleton — that stays the agent's job, per the loop's rule.
+
+```bash
+bin/clef-decide --sot --state-file report.md --skeleton-file skeleton.json --goal-file goal.json
+bin/clef-decide --sot --state-file report.md --skeleton-file skeleton.json --goal-file goal.json --final-panel
+```
+
+- `--skeleton-file`: map of point ID → question (choice/noul/score), ≤32. One request per point, so each point sees the full state under its own 16,384-token context budget instead of sharing one request's budget.
+- `--goal-file`: exactly one question, the final verdict. Its state is the original state plus the per-point verdicts, each rendered as `point_id -> verdict`.
+- `--final-panel`: the goal goes to the full tribunal (one judge, one vote, majority wins); a tie re-runs once, a second tie exits 2. Without it, the goal goes to `--judge` (default `clef`).
+- Expansion uses `--judge`/`--model`; with `--final-panel` the expansion still uses that judge while the verdict uses all four. `--sot` cannot be combined with `--questions` or `--panel` — contradictory flags fail loudly.
+- A failing point names itself: `[skeleton:<point_id>] <error>`.
+
+Use `--sot` when a gate's evidence is too large for one request's context budget, or when the sub-judgments are genuinely independent and deserve the full state each. When the questions fit one request and share evidence, the plain batched form is cheaper (fewer requests).
 
 ## How a gate works
 
